@@ -1,89 +1,173 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using Unity.Netcode;
 
 public class PlayerController : MonoBehaviour {
-    private Rigidbody rb;
-    [SerializeField] private float speed = 5;
-    [SerializeField] private float turnSpeed = 360;     
-    private Vector2 move;    
-    private Vector3 moveInput;
-    
-    public float playerHeight;
-    public LayerMask whatIsGround;
-    private bool isGrounded; 
-    public float groundDrag;
-    
+    [SerializeField]
+    float moveSpeed = 4f;
+
+    [SerializeField] float dashDistance = 5f;
+    [SerializeField] float dashDuration = 0.5f;
+    [SerializeField] float dashCooldown = 3f;
+    private float lastDashTime = -Mathf.Infinity;
+
+    [SerializeField] float pushForce = 5f;
+    [SerializeField] float pushCooldown = 1f; // Adjust as needed
+    private float lastPushTime = -Mathf.Infinity;
+ 
+    Vector3 forward, right;
     Animator animator;
     private string currentState;
 
-    private void Start() {
+    public float coneAngle = 60f;
+    public float coneLength = 3f;
+ 
+    void Start ()
+    {
+        forward = Camera.main.transform.forward;
+        forward.y = 0;
+        forward = Vector3.Normalize(forward);
+        right = Quaternion.Euler(new Vector3(0, 90, 0)) * forward;
         animator = GetComponent<Animator>();
-        rb = GetComponent<Rigidbody>();
-        rb.freezeRotation = true;
-    }
-
-    private void Update() {
-        Look();
-        Move();
-        SpeedControl();
-
-        isGrounded = Physics.Raycast(transform.position, Vector3.down, playerHeight * 0.5f + 0.2f, whatIsGround);
-        if(isGrounded) {
-            rb.drag = groundDrag;
-        } else {
-            rb.drag = 0;
-        }
-
-        if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.D)){
-            ChangeAnimationState("Run");
-            Move();
-        } else if(Input.GetKey(KeyCode.Space)) {
-            ChangeAnimationState("Dash"); // Should be swapped and added to Dash logic to only trigger when the dash is happening
-        } else {
-            ChangeAnimationState("Idle");
-        }
-    }
-
-    private void Look() {
-        move = new Vector2(Input.GetAxis("Horizontal"), Input.GetAxis("Vertical"));
-        moveInput = new Vector3(move.x, 0, move.y);
-        if (moveInput == Vector3.zero) return;
-
-        var rot = Quaternion.LookRotation(moveInput.ToIso(), Vector3.up);
-        transform.rotation = Quaternion.RotateTowards(transform.rotation, rot, turnSpeed * Time.deltaTime);
-    }
-
-        public void Teleport(Vector3 position, Quaternion rotation) {
-        transform.position = position;
-        Physics.SyncTransforms();
     }
 
     void ChangeAnimationState(string newState) {
         if(currentState == newState) return;
         animator.Play(newState);
     }
-
-    private void Move() {
-        rb.AddForce(moveInput.ToIso().normalized * speed, ForceMode.Force);
+ 
+ 
+    void Update ()
+    {
+        
+        if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.D)){
+            ChangeAnimationState("Run");
+            Move();
+        } else {
+            ChangeAnimationState("Idle");
+        }
+        if(Input.GetKeyDown(KeyCode.Space) && Time.time - lastDashTime >= dashCooldown) {
+            ChangeAnimationState("Dash");
+            Dash();
+            lastDashTime = Time.time;
+        } 
+        if(Input.GetKeyDown(KeyCode.F)) {
+            Push();
+        }
+        OnDrawGizmos();
     }
 
-    private void SpeedControl()
+    void Push()
     {
-        Vector3 flatVel = new Vector3(rb.velocity.x, 0f, rb.velocity.z);
-
-        // limit velocity if needed
-        if(flatVel.magnitude > speed)
+        if (Time.time - lastPushTime >= pushCooldown)
         {
-            Vector3 limitedVel = flatVel.normalized * speed;
-            rb.velocity = new Vector3(limitedVel.x, rb.velocity.y, limitedVel.z);
+            float coneAngle = 60f; // Adjust the cone angle as needed
+
+            Vector3 coneDirection = transform.forward;
+
+            float halfConeAngleRad = Mathf.Deg2Rad * coneAngle * 0.5f;
+
+            LayerMask pushableLayer = LayerMask.GetMask("Pushable"); // Make sure to assign the appropriate layer
+
+            Collider[] nearbyColliders = Physics.OverlapSphere(transform.position, coneLength, pushableLayer); // Adjust the cone length as needed
+
+            foreach (Collider collider in nearbyColliders)
+            {
+                if (collider.gameObject != gameObject)
+                {
+                    Vector3 playerToTarget = collider.transform.position - transform.position;
+
+                    float angle = Vector3.Angle(coneDirection, playerToTarget);
+
+                    if (angle <= coneAngle * 0.5f)
+                    {
+                        Rigidbody rigidbody = collider.gameObject.GetComponent<Rigidbody>();
+
+                        if (rigidbody != null)
+                        {
+                            Vector3 forceToApply = coneDirection * pushForce;
+
+                            rigidbody.AddForce(forceToApply, ForceMode.Impulse);
+                        }
+                    }
+                }
+            }
+
+            // Update the last push time
+            lastPushTime = Time.time;
         }
     }
-}
 
-public static class Helpers 
-{
-    private static Matrix4x4 isoMatrix = Matrix4x4.Rotate(Quaternion.Euler(0, 45, 0));
-    public static Vector3 ToIso(this Vector3 input) => isoMatrix.MultiplyPoint3x4(input);
+    void OnDrawGizmos()
+    {
+
+        Vector3 coneDirection = transform.forward;
+
+        // Calculate the half angles of the cone
+        float halfConeAngleRad = Mathf.Deg2Rad * coneAngle * 0.5f;
+
+        // Calculate the forward edge of the cone
+        Vector3 forwardEdge = transform.position + coneDirection * coneLength;
+
+        // Calculate the left and right edges of the cone
+        Vector3 leftEdge = transform.position + Quaternion.Euler(0, -coneAngle * 0.5f, 0) * coneDirection * coneLength;
+        Vector3 rightEdge = transform.position + Quaternion.Euler(0, coneAngle * 0.5f, 0) * coneDirection * coneLength;
+
+        // Draw the cone in the scene view
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawLine(transform.position, forwardEdge);
+        Gizmos.DrawLine(transform.position, leftEdge);
+        Gizmos.DrawLine(transform.position, rightEdge);
+
+        // Draw lines connecting the edges to the player for clarity
+        Gizmos.color = Color.green;
+        Gizmos.DrawLine(transform.position, leftEdge);
+        Gizmos.DrawLine(transform.position, rightEdge);
+    }
+
+    void Dash() 
+    {
+        StartCoroutine(PerformDash());
+    }
+
+    IEnumerator PerformDash()
+    {
+        float startTime = Time.time;
+        Vector3 dashDirection = transform.forward;
+        Vector3 startPosition = transform.position;
+        Vector3 endPosition = startPosition + dashDirection * dashDistance;
+
+        while (Time.time - startTime < dashDuration)
+        {
+            float progress = (Time.time - startTime) / dashDuration;
+            transform.position = Vector3.Lerp(startPosition, endPosition, progress);
+            yield return null;
+        }
+
+        // Ensure the player ends up at the exact dash destination
+        transform.position = endPosition;
+
+        // Transition back to the appropriate state
+        if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.D))
+        {
+            ChangeAnimationState("Run");
+        }
+        else
+        {
+            ChangeAnimationState("Idle");
+        }
+    }
+    
+    void Move()
+    {
+        Vector3 direction = new Vector3(Input.GetAxis("Horizontal"), 0, Input.GetAxis("Vertical"));
+        Vector3 rightMovement = right * moveSpeed * Time.deltaTime * Input.GetAxis("Horizontal");
+        Vector3 upMovement = forward * moveSpeed * Time.deltaTime * Input.GetAxis("Vertical");
+ 
+        Vector3 heading = Vector3.Normalize(rightMovement + upMovement);
+ 
+        transform.forward = heading;
+        transform.position += rightMovement;
+        transform.position += upMovement;
+    }
 }

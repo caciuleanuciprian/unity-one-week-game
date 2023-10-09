@@ -1,10 +1,14 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using Unity.Netcode;
 
-public class PlayerController : MonoBehaviour {
+public class PlayerController : NetworkBehaviour {
     [SerializeField]
     float moveSpeed = 4f;
+
+    public ParticleSystem dust;
+    public ParticleSystem vomit;
 
     [SerializeField] float dashDistance = 5f;
     [SerializeField] float dashDuration = 0.5f;
@@ -18,12 +22,17 @@ public class PlayerController : MonoBehaviour {
     Vector3 forward, right;
     Animator animator;
     private string currentState;
+    public AudioSource burp;
+    public AudioSource fart;
+    public AudioSource walk;
+
 
     public float coneAngle = 60f;
     public float coneLength = 3f;
  
     void Start ()
     {
+        transform.position = new Vector3(Random.Range(3f, -3f), 3f, Random.Range(3f, -3f));
         forward = Camera.main.transform.forward;
         forward.y = 0;
         forward = Vector3.Normalize(forward);
@@ -33,15 +42,32 @@ public class PlayerController : MonoBehaviour {
 
     void ChangeAnimationState(string newState) {
         if(currentState == newState) return;
+        if (animator.GetCurrentAnimatorStateInfo(0).normalizedTime > 1) {
         animator.Play(newState);
+        }
+    }
+
+    public void PlayBurp(){
+        burp.Play();
+    }
+
+    public void PlayFart(){
+        fart.Play();
+    }
+
+    public void PlayWalk(){
+        walk.Play();
     }
  
  
     void Update ()
     {
+
+        if(!IsOwner) return;
         
         if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.D)){
             ChangeAnimationState("Run");
+            PlayWalk();
             Move();
         } else {
             ChangeAnimationState("Idle");
@@ -49,18 +75,21 @@ public class PlayerController : MonoBehaviour {
         if(Input.GetKeyDown(KeyCode.Space) && Time.time - lastDashTime >= dashCooldown) {
             ChangeAnimationState("Dash");
             Dash();
+            PlayFart();
             lastDashTime = Time.time;
         } 
         if(Input.GetKeyDown(KeyCode.F)) {
             Push();
+            ChangeAnimationState("Push");
+            PlayBurp();
         }
-        OnDrawGizmos();
     }
 
     void Push()
     {
         if (Time.time - lastPushTime >= pushCooldown)
         {
+            CreateVomit();
             float coneAngle = 60f; // Adjust the cone angle as needed
 
             Vector3 coneDirection = transform.forward;
@@ -98,35 +127,9 @@ public class PlayerController : MonoBehaviour {
         }
     }
 
-    void OnDrawGizmos()
-    {
-
-        Vector3 coneDirection = transform.forward;
-
-        // Calculate the half angles of the cone
-        float halfConeAngleRad = Mathf.Deg2Rad * coneAngle * 0.5f;
-
-        // Calculate the forward edge of the cone
-        Vector3 forwardEdge = transform.position + coneDirection * coneLength;
-
-        // Calculate the left and right edges of the cone
-        Vector3 leftEdge = transform.position + Quaternion.Euler(0, -coneAngle * 0.5f, 0) * coneDirection * coneLength;
-        Vector3 rightEdge = transform.position + Quaternion.Euler(0, coneAngle * 0.5f, 0) * coneDirection * coneLength;
-
-        // Draw the cone in the scene view
-        Gizmos.color = Color.yellow;
-        Gizmos.DrawLine(transform.position, forwardEdge);
-        Gizmos.DrawLine(transform.position, leftEdge);
-        Gizmos.DrawLine(transform.position, rightEdge);
-
-        // Draw lines connecting the edges to the player for clarity
-        Gizmos.color = Color.green;
-        Gizmos.DrawLine(transform.position, leftEdge);
-        Gizmos.DrawLine(transform.position, rightEdge);
-    }
-
     void Dash() 
     {
+        CreateDust();
         StartCoroutine(PerformDash());
     }
 
@@ -147,27 +150,26 @@ public class PlayerController : MonoBehaviour {
         // Ensure the player ends up at the exact dash destination
         transform.position = endPosition;
 
-        // Transition back to the appropriate state
-        if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.D))
-        {
-            ChangeAnimationState("Run");
-        }
-        else
-        {
-            ChangeAnimationState("Idle");
-        }
     }
     
     void Move()
     {
         Vector3 direction = new Vector3(Input.GetAxis("Horizontal"), 0, Input.GetAxis("Vertical"));
-        Vector3 rightMovement = right * moveSpeed * Time.deltaTime * Input.GetAxis("Horizontal");
-        Vector3 upMovement = forward * moveSpeed * Time.deltaTime * Input.GetAxis("Vertical");
+        Vector3 rightMovement = right * moveSpeed * NetworkManager.Singleton.ServerTime.FixedDeltaTime * Input.GetAxis("Horizontal");
+        Vector3 upMovement = forward * moveSpeed * NetworkManager.Singleton.ServerTime.FixedDeltaTime * Input.GetAxis("Vertical");
  
         Vector3 heading = Vector3.Normalize(rightMovement + upMovement);
  
         transform.forward = heading;
         transform.position += rightMovement;
         transform.position += upMovement;
+    }
+
+    void CreateDust() {
+        dust.Play();
+    }
+
+    void CreateVomit() {
+        vomit.Play();
     }
 }
